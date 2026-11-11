@@ -3,14 +3,14 @@ import { dirname, join, resolve as absolutePath } from 'node:path';
 import { lstat } from 'node:fs/promises';
 import { SessionStoreError } from './errors.js';
 
-// Fixed script, input as JSON on stdin. Paths are never interpolated into PowerShell code.
+// Fixed script; non-secret path/options arrive as JSON in a dedicated environment value.
+// Paths are never interpolated into PowerShell code; no child stdin pipe is needed.
 // Keep user, SYSTEM and Administrators access; reject every other allow entry. Windows
 // administrators, like Unix root, are outside the store's threat model.
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
-[Console]::InputEncoding = New-Object System.Text.UTF8Encoding
 try {
-  $request = [Console]::In.ReadLine() | ConvertFrom-Json
+  $request = $env:FAMILY_MCP_ACL_REQUEST | ConvertFrom-Json
   $path = [string]$request.path
   $item = Get-Item -LiteralPath $path -Force
   if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'link' }
@@ -68,7 +68,7 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
         Buffer.from(SCRIPT, 'utf16le').toString('base64'),
       ],
       {
-        stdio: ['pipe', 'pipe', 'ignore'],
+        stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
         env: { SystemRoot: root, WINDIR: root, TEMP: process.env['TEMP'], TMP: process.env['TMP'] },
       },
@@ -92,7 +92,6 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
     };
 
     child.once('error', fail);
-    child.stdin.on('error', fail);
     child.stdout.on('data', (chunk: Buffer) => {
       output += chunk.toString();
 
@@ -107,6 +106,5 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
       if (code === 0 && output === 'ok') resolve();
       else fail();
     });
-    child.stdin.end(JSON.stringify({ path, create }) + '\n');
   });
 }
