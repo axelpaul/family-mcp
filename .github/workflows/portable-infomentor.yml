@@ -32,6 +32,9 @@ jobs:
           suffix=''
           if [[ "$RUNNER_OS" == 'Windows' ]]; then suffix='.exe'; fi
           bun build --compile packages/infomentor-mcp/src/portable-cli.ts --outfile "portable/infomentor-mcp${suffix}"
+      - name: Diagnose Windows process environment
+        if: runner.os == 'Windows'
+        run: bun .github/scripts/windows-diagnostic.ts
       - name: Native storage, ACL and executable tests
         shell: bash
         run: |
