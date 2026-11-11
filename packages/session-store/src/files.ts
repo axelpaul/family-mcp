@@ -1,3 +1,4 @@
+import { windowsPrivatePath } from './windows.js';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
@@ -81,6 +82,20 @@ export async function readPrivateFile(path: string, options: ReadOptions): Promi
 
 /** {@link readPrivateFile} without text decoding, for binary files such as keys. */
 export async function readPrivateBytes(path: string, options: ReadOptions): Promise<Buffer> {
+  if (process.platform === 'win32') {
+    // Filesystem I/O boundary: inspect only the system error code.
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters
+    const info = await lstat(path).catch((error: unknown) => {
+      if (systemErrorCode(error) === 'ENOENT')
+        throw new SessionStoreError('NOT_FOUND', 'The file does not exist.');
+      throw error;
+    });
+
+    if (info.isSymbolicLink())
+      throw new SessionStoreError('UNSAFE_FILE', 'Symbolic links are not private files.');
+    await windowsPrivatePath(path);
+  }
+
   const { maxBytes } = options;
 
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
@@ -216,14 +231,53 @@ export async function ensurePrivateDir(
   options: DirectoryOptions = {},
 ): Promise<void> {
   try {
+    if (process.platform === 'win32') {
+      // Filesystem I/O boundary: inspect only the system error code.
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters
+      const existing = await lstat(path).catch((error: unknown) => {
+        if (systemErrorCode(error) === 'ENOENT') return undefined;
+        throw error;
+      });
+
+      if (existing) {
+        if (!existing.isDirectory() || existing.isSymbolicLink())
+          throw new SessionStoreError('UNSAFE_FILE', 'Expected a private directory.');
+        await windowsPrivatePath(path);
+
+        return;
+      }
+
+      // mkdir must win exclusively; never tighten an existing folder that another process owns.
+      try {
+        await mkdir(path);
+      } catch (error) {
+        if (systemErrorCode(error) === 'ENOENT') {
+          await ensurePrivateDir(dirname(path));
+
+          return ensurePrivateDir(path);
+        }
+
+        if (systemErrorCode(error) === 'EEXIST') {
+          await windowsPrivatePath(path);
+
+          return;
+        }
+
+        throw ioError(error, 'Cannot create private Windows directory.');
+      }
+
+      await windowsPrivatePath(path, true);
+
+      return;
+    }
+
     await mkdir(path, { recursive: true, mode: 0o700 });
     const info = await stat(path);
 
     if (!info.isDirectory())
       throw new SessionStoreError('UNSAFE_FILE', 'The directory path is not a directory.');
 
-    if (options.enforceMode && process.platform !== 'win32' && (info.mode & 0o077) !== 0)
-      await chmod(path, 0o700);
+    if (options.enforceMode && (info.mode & 0o077) !== 0) await chmod(path, 0o700);
   } catch (error) {
     throw ioError(error, 'Cannot create the directory. Check its permissions.');
   }

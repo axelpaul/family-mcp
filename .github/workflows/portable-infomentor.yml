@@ -1,0 +1,41 @@
+name: Portable InfoMentor
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'packages/infomentor-mcp/**'
+      - 'packages/session-store/**'
+      - '.github/workflows/portable-infomentor.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit -p packages/infomentor-mcp/tsconfig.json
+      - name: Build native executable
+        shell: bash
+        run: |
+          mkdir -p portable
+          suffix=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then suffix='.exe'; fi
+          bun build --compile packages/infomentor-mcp/src/portable-cli.ts --outfile "portable/infomentor-mcp${suffix}"
+      - name: Native storage, ACL and executable tests
+        shell: bash
+        run: |
+          suffix=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then suffix='.exe'; fi
+          INFOMENTOR_PORTABLE_BINARY="portable/infomentor-mcp${suffix}" bun test packages/infomentor-mcp/test/portable.test.ts --timeout 180000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infomentor-${{ runner.os }}-${{ runner.arch }}
+          path: portable/*
