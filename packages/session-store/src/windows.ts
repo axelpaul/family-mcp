@@ -8,6 +8,7 @@ import { SessionStoreError } from './errors.js';
 // administrators, like Unix root, are outside the store's threat model.
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = New-Object System.Text.UTF8Encoding
 try {
   $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
   $path = [string]$request.path
@@ -27,7 +28,9 @@ try {
   }
   $acl = Get-Acl -LiteralPath $path
   $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-  if ($owner -ne $self.Value) { throw 'owner' }
+  if ($owner -notin @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) { throw 'owner' }
+  $raw = New-Object Security.AccessControl.RawSecurityDescriptor($acl.Sddl)
+  if ($null -eq $raw.DiscretionaryAcl) { throw 'null-dacl' }
   foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
     if ($rule.AccessControlType -ne 'Allow') { continue }
     if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
