@@ -70,7 +70,13 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
       {
         stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
-        env: { SystemRoot: root, WINDIR: root, TEMP: process.env['TEMP'], TMP: process.env['TMP'] },
+        env: {
+          SystemRoot: root,
+          WINDIR: root,
+          TEMP: process.env['TEMP'],
+          TMP: process.env['TMP'],
+          FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path, create }),
+        },
       },
     );
 
