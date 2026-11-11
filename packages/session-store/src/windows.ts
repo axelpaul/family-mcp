@@ -10,7 +10,7 @@ const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding
 try {
-  $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+  $request = [Console]::In.ReadLine() | ConvertFrom-Json
   $path = [string]$request.path
   $item = Get-Item -LiteralPath $path -Force
   if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'link' }
@@ -107,6 +107,6 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
       if (code === 0 && output === 'ok') resolve();
       else fail();
     });
-    child.stdin.end(JSON.stringify({ path, create }));
+    child.stdin.end(JSON.stringify({ path, create }) + '\n');
   });
 }
