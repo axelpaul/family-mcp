@@ -6,6 +6,9 @@ on:
       - 'packages/infomentor-mcp/**'
       - 'packages/session-store/**'
       - '.github/workflows/portable-infomentor.yml'
+concurrency:
+  group: portable-infomentor-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
