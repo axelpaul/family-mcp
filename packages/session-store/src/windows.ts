@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { dirname, join, resolve as absolutePath } from 'node:path';
 import { lstat } from 'node:fs/promises';
 import { SessionStoreError } from './errors.js';
@@ -37,6 +36,7 @@ try {
     if ($rule.IdentityReference.Value -notin @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) { throw 'sharing' }
   }
   [Console]::Out.Write('ok')
+  exit 0
 } catch { exit 1 }
 `;
 
@@ -57,60 +57,37 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
   const root = process.env['SystemRoot'];
 
   if (!root) throw new SessionStoreError('UNSAFE_FILE', 'Windows system directory is unavailable.');
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      [
+
+  try {
+    const child = Bun.spawn({
+      cmd: [
+        join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
         '-EncodedCommand',
         Buffer.from(SCRIPT, 'utf16le').toString('base64'),
       ],
-      {
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
-        env: {
-          SystemRoot: root,
-          WINDIR: root,
-          TEMP: process.env['TEMP'],
-          TMP: process.env['TMP'],
-          FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path, create }),
-        },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env: {
+        SystemRoot: root,
+        WINDIR: root,
+        TEMP: process.env['TEMP'],
+        TMP: process.env['TMP'],
+        FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path, create }),
       },
+      timeout: 20_000,
+    });
+
+    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+
+    if (code !== 0 || output !== 'ok') throw new Error('ACL helper refused');
+  } catch {
+    throw new SessionStoreError(
+      'UNSAFE_FILE',
+      'Cannot verify private Windows permissions. Use a local NTFS folder owned by your Windows account, without sharing it with other users.',
     );
-
-    let output = '';
-
-    const timer = setTimeout(() => {
-      child.kill();
-      fail();
-    }, 20_000);
-
-    const fail = (): void => {
-      clearTimeout(timer);
-      reject(
-        new SessionStoreError(
-          'UNSAFE_FILE',
-          'Cannot verify private Windows permissions. Use a local NTFS folder owned by your Windows account, without sharing it with other users.',
-        ),
-      );
-    };
-
-    child.once('error', fail);
-    child.stdout.on('data', (chunk: Buffer) => {
-      output += chunk.toString();
-
-      if (output.length > 100) {
-        child.kill();
-        fail();
-      }
-    });
-    child.once('close', (code) => {
-      clearTimeout(timer);
-
-      if (code === 0 && output === 'ok') resolve();
-      else fail();
-    });
-  });
+  }
 }
