@@ -16,7 +16,7 @@ try {
     ['acl-isolated', aclScript, isolated],
   ] as const) {
     const child = Bun.spawn([exe, '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-      env: { ...env, FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path: scratch, create: true }) },
+      env: { ...env, FAMILY_MCP_ACL_PATH: scratch, FAMILY_MCP_ACL_CREATE: '1' },
       stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 5000,
     });
     const result = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

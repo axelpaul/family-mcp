@@ -2,33 +2,35 @@ import { dirname, join, resolve as absolutePath } from 'node:path';
 import { lstat } from 'node:fs/promises';
 import { SessionStoreError } from './errors.js';
 
-// Fixed script; non-secret path/options arrive as JSON in a dedicated environment value.
+// Fixed, module-free .NET script; non-secret paths/options arrive in dedicated environment values.
 // Paths are never interpolated into PowerShell code; no child stdin pipe is needed.
 // Keep user, SYSTEM and Administrators access; reject every other allow entry. Windows
 // administrators, like Unix root, are outside the store's threat model.
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 try {
-  $request = $env:FAMILY_MCP_ACL_REQUEST | ConvertFrom-Json
-  $path = [string]$request.path
-  $item = Get-Item -LiteralPath $path -Force
-  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'link' }
+  $path = $env:FAMILY_MCP_ACL_PATH
+  $attributes = [IO.File]::GetAttributes($path)
+  $directory = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+  if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'link' }
   $self = [Security.Principal.WindowsIdentity]::GetCurrent().User
-  if ($request.create) {
-    $acl = New-Object Security.AccessControl.DirectorySecurity
+  if ($env:FAMILY_MCP_ACL_CREATE -eq '1') {
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
     $acl.SetOwner($self)
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($sid in @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) {
-      $identity = New-Object Security.Principal.SecurityIdentifier($sid)
-      $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+      $identity = [Security.Principal.SecurityIdentifier]::new($sid)
+      $rule = [Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
       $acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $path -AclObject $acl
+    if (!$directory) { throw 'not-directory' }
+    [IO.Directory]::SetAccessControl($path, $acl)
   }
-  $acl = Get-Acl -LiteralPath $path
+  if ($directory) { $acl = [IO.Directory]::GetAccessControl($path) }
+  else { $acl = [IO.File]::GetAccessControl($path) }
   $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
   if ($owner -notin @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) { throw 'owner' }
-  $raw = New-Object Security.AccessControl.RawSecurityDescriptor($acl.Sddl)
+  $raw = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All))
   if ($null -eq $raw.DiscretionaryAcl) { throw 'null-dacl' }
   foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
     if ($rule.AccessControlType -ne 'Allow') { continue }
@@ -58,9 +60,12 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
 
   if (!root) throw new SessionStoreError('UNSAFE_FILE', 'Windows system directory is unavailable.');
 
-  const env: NodeJS.ProcessEnv = { FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path, create }) };
+  const env: NodeJS.ProcessEnv = {
+    FAMILY_MCP_ACL_PATH: path,
+    FAMILY_MCP_ACL_CREATE: create ? '1' : '0',
+  };
 
-  // PowerShell's module loader needs standard Windows user/module locations. Do not inherit
+  // Retain standard Windows process locations, but never inherit
   // application secrets (notably the InfoMentor password injected during interactive login).
   for (const name of [
     'SystemRoot',
