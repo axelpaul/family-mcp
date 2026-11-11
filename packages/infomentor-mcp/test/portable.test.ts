@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { z } from 'zod';
@@ -54,7 +55,7 @@ test('portable encrypted store preserves secrets and coordinates concurrent upda
 }, 180_000);
 
 test('private files round-trip and Windows rejects widened ACLs', async () => {
-  const scratch = await mkdtemp(join(tmpdir(), 'portable-infomentor-acl-'));
+  const scratch = await mkdtemp(join(tmpdir(), 'portable-infomentor-Íslenska-'));
 
   try {
     const directory = join(scratch, 'private');
@@ -70,7 +71,7 @@ test('private files round-trip and Windows rejects widened ACLs', async () => {
       });
 
       expect(await child.exited).toBe(0);
-      expect(readPrivateFile(file, { maxBytes: 100 })).rejects.toThrow();
+      await assert.rejects(readPrivateFile(file, { maxBytes: 100 }));
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });
