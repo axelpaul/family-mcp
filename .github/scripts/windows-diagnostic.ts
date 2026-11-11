@@ -6,7 +6,7 @@ const root = process.env.SystemRoot!;
 const exe = join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const scratch = await mkdtemp(join(tmpdir(), 'acl-diagnostic-'));
 const source = await readFile('packages/session-store/src/windows.ts', 'utf8');
-const aclScript = source.split('const SCRIPT = String.raw`')[1]!.split('`;')[0]!;
+const aclScript = source.split('const SCRIPT = String.raw`')[1]!.split('`;')[0]!.replace('} catch { exit 1 }', '} catch { [Console]::Error.Write($_.Exception.Message); exit 1 }');
 const isolated = { SystemRoot: root, WINDIR: root, TEMP: process.env.TEMP, TMP: process.env.TMP };
 try {
   for (const [name, script, env] of [

@@ -58,6 +58,34 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
 
   if (!root) throw new SessionStoreError('UNSAFE_FILE', 'Windows system directory is unavailable.');
 
+  const env: NodeJS.ProcessEnv = { FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path, create }) };
+
+  // PowerShell's module loader needs standard Windows user/module locations. Do not inherit
+  // application secrets (notably the InfoMentor password injected during interactive login).
+  for (const name of [
+    'SystemRoot',
+    'WINDIR',
+    'TEMP',
+    'TMP',
+    'USERPROFILE',
+    'LOCALAPPDATA',
+    'APPDATA',
+    'PSModulePath',
+    'PATH',
+    'ComSpec',
+    'USERDOMAIN',
+    'USERNAME',
+    'HOMEDRIVE',
+    'HOMEPATH',
+    'PROCESSOR_ARCHITECTURE',
+    'OS',
+    'ProgramFiles',
+    'ProgramFiles(x86)',
+    'ProgramW6432',
+  ]) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
+
   try {
     const child = Bun.spawn({
       cmd: [
@@ -71,13 +99,7 @@ export async function windowsPrivatePath(path: string, create = false): Promise<
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'ignore',
-      env: {
-        SystemRoot: root,
-        WINDIR: root,
-        TEMP: process.env['TEMP'],
-        TMP: process.env['TMP'],
-        FAMILY_MCP_ACL_REQUEST: JSON.stringify({ path, create }),
-      },
+      env,
       timeout: 20_000,
     });
 
