@@ -8,15 +8,15 @@
     "mcp",
     "school"
   ],
-  "homepage": "https://github.com/olafurns7/family-mcp/tree/main/packages/infomentor-mcp#readme",
+  "homepage": "https://github.com/axelpaul/infomentor-mcp#readme",
   "bugs": {
-    "url": "https://github.com/olafurns7/family-mcp/issues"
+    "url": "https://github.com/axelpaul/infomentor-mcp/issues"
   },
   "license": "MIT",
-  "author": "Ólafur Nils Sigurðsson",
+  "author": "\u00d3lafur Nils Sigur\u00f0sson",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/olafurns7/family-mcp.git",
+    "url": "git+https://github.com/axelpaul/infomentor-mcp.git",
     "directory": "packages/infomentor-mcp"
   },
   "type": "module",
@@ -34,7 +34,9 @@
     "typecheck": "tsc --noEmit",
     "lint:fix": "bun run lint --fix",
     "test:binary": "node ../../tooling/release/mcp-smoke.mjs --package . --bin release/native/infomentor-mcp --standalone",
-    "release:sync": "node ../../tooling/release/sync-version.mjs --package ."
+    "release:sync": "node ../../tooling/release/sync-version.mjs --package .",
+    "build:portable": "bun build --compile src/portable-cli.ts --outfile release/portable/infomentor-mcp",
+    "start:portable": "bun src/portable-cli.ts"
   },
   "dependencies": {
     "@family-mcp/mcp-runtime": "workspace:^",

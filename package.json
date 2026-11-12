@@ -1,5 +1,5 @@
 {
-  "name": "family-mcp",
+  "name": "infomentor-mcp-workspace",
   "private": true,
   "workspaces": [
     "packages/*",

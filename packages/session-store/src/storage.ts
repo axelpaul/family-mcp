@@ -1,10 +1,11 @@
+import { windowsPrivatePath } from './windows.js';
 import type { Stats } from 'node:fs';
 import { lstat, mkdir, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 
 import { SessionStoreError, systemErrorCode } from './errors.js';
-import { FOREIGN_FILE, LINKED_FILE, OPEN_FILE } from './files.js';
+import { ensurePrivateDir, FOREIGN_FILE, LINKED_FILE, OPEN_FILE } from './files.js';
 import { TEST_LS, testSeam } from './seam.js';
 import { runBounded } from './spawn.js';
 
@@ -169,7 +170,26 @@ export async function checkStorePaths(options: {
   /** A file that may carry one recognised extra link, such as a key whose publication crashed. */
   allowLink?: ((path: string, info: Stats) => Promise<boolean>) | undefined;
 }): Promise<void> {
-  if (process.platform === 'win32') return;
+  if (process.platform === 'win32') {
+    for (const directory of options.directories) {
+      if (options.create?.includes(directory)) await ensurePrivateDir(directory);
+      else if (await lstatOrMissing(directory)) await windowsPrivatePath(directory);
+    }
+
+    for (const file of options.files ?? []) {
+      const info = await lstatOrMissing(file);
+
+      if (!info) continue;
+      const links = options.allowLink && (await options.allowLink(file, info)) ? 2 : 1;
+      const problem = privateFileProblem(info, undefined, links);
+
+      if (problem) throw refusal(problem, file);
+      await windowsPrivatePath(file);
+    }
+
+    return;
+  }
+
   const uid = process.getuid?.() ?? 0;
   const checked: Checked[] = [];
 

@@ -54,7 +54,10 @@ export function macStoreRoot(): string {
  * ignored, as the XDG base directory specification requires.
  */
 export function defaultSessionPath(appName: string, options: SessionPathOptions = {}): string {
-  const directory = join(xdgBase('XDG_CONFIG_HOME', '.config'), plainName(appName));
+  const directory = join(
+    process.platform === 'win32' ? windowsStoreRoot() : xdgBase('XDG_CONFIG_HOME', '.config'),
+    plainName(appName),
+  );
 
   if (options.legacy !== undefined && isExistingFile(options.legacy)) return options.legacy;
 
@@ -72,7 +75,11 @@ export function defaultSecretRecordPath(appName: string, options: StorePathOptio
   if (appName === 'keys') throw new RangeError('appName must not be keys.');
 
   return join(
-    macStore(options.platform) ? macStoreRoot() : xdgBase('XDG_CONFIG_HOME', '.config'),
+    (options.platform ?? process.platform) === 'win32'
+      ? windowsStoreRoot()
+      : macStore(options.platform)
+        ? macStoreRoot()
+        : xdgBase('XDG_CONFIG_HOME', '.config'),
     appName,
     'session.enc',
   );
@@ -96,12 +103,15 @@ export function defaultKeyProvider(options: DefaultKeyProviderOptions): KeyProvi
       'FAMILY_MCP_KEY_BACKEND is not supported. Set it to file or unset it.',
     );
 
-  if (platform !== 'darwin' && platform !== 'linux')
+  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32')
     throw new SessionStoreError('STORE_UNAVAILABLE', 'This platform has no supported store key.');
 
-  const root = macStore(platform)
-    ? macStoreRoot()
-    : join(xdgBase('XDG_DATA_HOME', join('.local', 'share')), 'family-mcp');
+  const root =
+    platform === 'win32'
+      ? windowsStoreRoot()
+      : macStore(platform)
+        ? macStoreRoot()
+        : join(xdgBase('XDG_DATA_HOME', join('.local', 'share')), 'family-mcp');
 
   return new LocalKeyFileProvider({ path: join(root, 'keys', `${server}.${profile}.key`) });
 }
@@ -165,4 +175,16 @@ function isExistingFile(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function windowsStoreRoot(): string {
+  const base = process.env['LOCALAPPDATA'];
+
+  if (!base || !isAbsolute(base))
+    throw new SessionStoreError(
+      'STORE_UNAVAILABLE',
+      'LOCALAPPDATA must name an absolute Windows user data folder.',
+    );
+
+  return join(base, 'family-mcp');
 }

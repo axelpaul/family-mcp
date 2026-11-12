@@ -1,0 +1,120 @@
+import { dirname, join, resolve as absolutePath } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { SessionStoreError } from './errors.js';
+
+// Fixed, module-free .NET script; non-secret paths/options arrive in dedicated environment values.
+// Paths are never interpolated into PowerShell code; no child stdin pipe is needed.
+// Keep user, SYSTEM and Administrators access; reject every other allow entry. Windows
+// administrators, like Unix root, are outside the store's threat model.
+const SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+try {
+  $path = $env:FAMILY_MCP_ACL_PATH
+  $attributes = [IO.File]::GetAttributes($path)
+  $directory = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+  if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'link' }
+  $self = [Security.Principal.WindowsIdentity]::GetCurrent().User
+  if ($env:FAMILY_MCP_ACL_CREATE -eq '1') {
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetOwner($self)
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) {
+      $identity = [Security.Principal.SecurityIdentifier]::new($sid)
+      $rule = [Security.AccessControl.FileSystemAccessRule]::new($identity, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+      $acl.AddAccessRule($rule)
+    }
+    if (!$directory) { throw 'not-directory' }
+    [IO.Directory]::SetAccessControl($path, $acl)
+  }
+  if ($directory) { $acl = [IO.Directory]::GetAccessControl($path) }
+  else { $acl = [IO.File]::GetAccessControl($path) }
+  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+  if ($owner -notin @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) { throw 'owner' }
+  $raw = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All))
+  if ($null -eq $raw.DiscretionaryAcl) { throw 'null-dacl' }
+  foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -ne 'Allow') { continue }
+    if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+    if ($rule.IdentityReference.Value -notin @($self.Value, 'S-1-5-18', 'S-1-5-32-544')) { throw 'sharing' }
+  }
+  [Console]::Out.Write('ok')
+  exit 0
+} catch { exit 1 }
+`;
+
+/** Check Windows ACLs, or secure a newly-created empty directory before writing any secret. */
+export async function windowsPrivatePath(path: string, create = false): Promise<void> {
+  if (process.platform !== 'win32') return;
+
+  for (let current = absolutePath(path); ; current = dirname(current)) {
+    if ((await lstat(current)).isSymbolicLink())
+      throw new SessionStoreError(
+        'UNSAFE_FILE',
+        'Windows store paths must not contain links or junctions.',
+      );
+
+    if (dirname(current) === current) break;
+  }
+
+  const root = process.env['SystemRoot'];
+
+  if (!root) throw new SessionStoreError('UNSAFE_FILE', 'Windows system directory is unavailable.');
+
+  const env: NodeJS.ProcessEnv = {
+    FAMILY_MCP_ACL_PATH: path,
+    FAMILY_MCP_ACL_CREATE: create ? '1' : '0',
+  };
+
+  // Retain standard Windows process locations, but never inherit
+  // application secrets (notably the InfoMentor password injected during interactive login).
+  for (const name of [
+    'SystemRoot',
+    'WINDIR',
+    'TEMP',
+    'TMP',
+    'USERPROFILE',
+    'LOCALAPPDATA',
+    'APPDATA',
+    'PSModulePath',
+    'PATH',
+    'ComSpec',
+    'USERDOMAIN',
+    'USERNAME',
+    'HOMEDRIVE',
+    'HOMEPATH',
+    'PROCESSOR_ARCHITECTURE',
+    'OS',
+    'ProgramFiles',
+    'ProgramFiles(x86)',
+    'ProgramW6432',
+  ]) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
+
+  try {
+    const child = Bun.spawn({
+      cmd: [
+        join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-EncodedCommand',
+        Buffer.from(SCRIPT, 'utf16le').toString('base64'),
+      ],
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'ignore',
+      env,
+      timeout: 20_000,
+    });
+
+    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+
+    if (code !== 0 || output !== 'ok') throw new Error('ACL helper refused');
+  } catch {
+    throw new SessionStoreError(
+      'UNSAFE_FILE',
+      'Cannot verify private Windows permissions. Use a local NTFS folder owned by your Windows account, without sharing it with other users.',
+    );
+  }
+}
