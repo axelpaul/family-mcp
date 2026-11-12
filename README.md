@@ -5,7 +5,7 @@ A simpler, local InfoMentor MCP for **Windows, macOS and Linux**. Forked from
 The upstream InfoMentor HTTP client and read-only MCP tools are retained.
 
 **Status:** development preview. Native Windows/macOS verification is tracked by the
-[Portable InfoMentor workflow](https://github.com/axelpaul/family-mcp/actions/workflows/portable-infomentor.yml).
+[Portable InfoMentor workflow](https://github.com/axelpaul/infomentor-mcp/actions/workflows/portable-infomentor.yml).
 A cross-compiled executable alone is not proof of working Windows support.
 
 ## Three commands
